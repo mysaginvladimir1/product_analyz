@@ -1,140 +1,122 @@
-# server.py
-import pandas as pd
-import logging
-import time
+import os
+from pathlib import Path
+
 import asyncio
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-from data_manager import load_excel_data
-from ml_core import ProductionAnalytics
-from llm import GoRouterAnalyst
-from main import get_shifts_from_range  # если она вынесена отдельно
-import datetime
-from fastapi.staticfiles import StaticFiles
-from fastapi.middleware.cors import CORSMiddleware
+import logging
+import re
+import time
+
+import pandas as pd
 import uvicorn
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
-app = FastAPI(title="Производственный аналитик")
+from data_manager import load_excel_data, get_shifts_from_range
+from llm import AIAnalyst
+from ml_core import ProductionAnalytics
 
-#Настрйока логов
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
         logging.FileHandler("analyst.log", encoding='utf-8'),
-        logging.StreamHandler()
-    ]
+        logging.StreamHandler(),
+    ],
 )
 logger = logging.getLogger(__name__)
 
+app = FastAPI(title="Производственный аналитик")
 
-
-
-
-# Глобально загружаем данные и модель (один раз при старте)
-DATA_PATH = r"\\fpsa.ad.instrument52.ru\Папки отделов\Цифровизация производства\winnum\Архив.xlsx"
-#DATA_PATH = "C:\ВладимирАКСИС\Владимир\цифровизация_ГК_Инструмент\python\production_analyst\src\data_test.xlsx"          # путь к вашему Excel-файлу
-#MODEL_PATH = "Qwen/Qwen2-1.5B-Instruct"   # или локальный путь
+BASE_DIR = Path(__file__).resolve().parent
+DATA_PATH = os.environ.get("DATA_PATH", str(BASE_DIR / "data_test.xlsx"))
 SHIFT_DURATION = 720
-CACHE_TTL = 300 #        секунд — минимальный интервал между перечитываниями файла
-                          # даже если файл не менялся
-LOCAL_COPY = "data_local.xlsx"   # локальная копия — защита от блокировки Excel
-# --- Кэш данных ---
-DATA_CACHE = {
-    "df": None,
-    "all_shifts": None,
-    "mtime": 0,
-    "loaded_at": 0,
-}
 
-logger.info("Загрузка данных...")
-start=time.time()
+_state = {"df": pd.DataFrame()}
+llm = AIAnalyst()
 
 
-df = load_excel_data(DATA_PATH, save_processed=False)
-if df.empty:
-    logger.error("Данные не загружены")
-    raise RuntimeError("Данные не загружены")
-logger.info(f"Данные загружены за {time.time() - start:.2f} сек, строк: {len(df)}")
+def _load_data():
+    t0 = time.time()
+    df = load_excel_data(DATA_PATH, save_processed=False)
+    if df.empty:
+        logger.error("Данные не загружены")
+    else:
+        logger.info(f"Данные загружены за {time.time() - t0:.2f} сек, строк: {len(df)}")
+    _state["df"] = df
 
 
-logger.info("Загрузка модели...")
-start = time.time()
-llm = GoRouterAnalyst()   # ключ берётся из GOROUTER_API_KEY
-logger.info(f"Модель загружена за {time.time() - start:.2f} сек")
+_load_data()
 
-# --- Определяем класс запроса ---
+
 class QueryRequest(BaseModel):
     query: str
-    shift_duration: int = SHIFT_DURATION  # можно переопределить
+    shift_duration: int = SHIFT_DURATION
 
-# --- Вспомогательная функция для обработки запроса (копия из main_query_mode) ---
-def process_query(df, query, model, shift_duration):
+
+# ---------------------------------------------------------------
+# Основная логика запроса
+
+def process_query(df: pd.DataFrame, query: str, model: AIAnalyst, shift_duration: int, history=None):
     try:
-        # Здесь почти весь код из main_query_mode, но без Excel-сохранения и без print
-        # Используем переданный df, модель и shift_duration
         logger.info(f"Запрос: {query}")
-        step_start = time.time()
+
+        # Парсинг
+        step = time.time()
         all_shifts = sorted(df['Смена'].unique())
-        logger.debug(f"Всего смен: {len(all_shifts)}")
-        params = model.parse_user_query(query, available_shifts=all_shifts)
+        params = model.parse_user_query(query, available_shifts=all_shifts, history=history)
         if 'error' in params:
             logger.error(f"Ошибка парсинга: {params['error']}")
             return f"Ошибка: {params['error']}", None
+        logger.info(f"Параметры: {params} | {time.time() - step:.2f} сек")
 
-        logger.info(f"Параметры: {params}")
-        logger.info(f"Парсинг запроса занял {time.time() - step_start:.2f} сек")
-
-
-        step_start = time.time()
         metrics_type = params.get('metrics_type', 'kim')
-        logger.info(f"metrics_type: {metrics_type}")
         aggregation = params.get('aggregation', 'period')
-        logger.info(f"aggregation: {aggregation}")
-        machines = params.get('machines', [])
-        logger.info(f"machines: {machines}")
-        operators = params.get('operators', [])
-        logger.info(f"operators: {operators}")
+        machines = params.get('machines', []) or []
+        operators = params.get('operators', []) or []
 
-
-
-
-
-
+        # Смены
+        step = time.time()
         shift_list = None
         if 'start_date' in params and 'end_date' in params:
-            start_date = params['start_date']
-            end_date = params['end_date']
-            start_shift_type = params.get('start_shift_type')
-            end_shift_type = params.get('end_shift_type')
-            shift_list = get_shifts_from_range(df, start_date.isoformat(), end_date.isoformat(), start_shift_type, end_shift_type)
-            logger.info(f"Сформирован shift_list из дат: {shift_list}")
-        elif 'shift_list' in params and params['shift_list']:
+            shift_list = get_shifts_from_range(
+                df,
+                params['start_date'].isoformat(),
+                params['end_date'].isoformat(),
+                params.get('start_shift_type'),
+                params.get('end_shift_type'),
+            )
+            logger.info(f"shift_list из дат: {shift_list}")
+        elif params.get('shift_list'):
             shift_list = params['shift_list']
-            logger.info(f"Используем shift_list из запроса: {shift_list}")
+            logger.info(f"shift_list из запроса: {shift_list}")
         else:
             logger.info("Не указаны ни смены, ни даты. Анализируем все смены.")
-            shift_list = None
+        logger.info(f"Формирование shift_list: {time.time() - step:.2f} сек")
 
-        logger.info(f"Формирование shift_list заняло {time.time() - step_start:.2f} сек")
-        step_start = time.time()
-
+        # Аналитика
+        step = time.time()
         analytics = ProductionAnalytics(df, shift_duration=shift_duration)
-
-        result = None
         all_machines = analytics.df['Станок'].unique() if not analytics.df.empty else []
+
         if metrics_type == 'kim':
-            if aggregation == 'detailed':
-                result = analytics.summary_by_machine(shift_list=shift_list)
-            else:
-                result = analytics.summary_by_machine_period(shift_list=shift_list)
+            result = (analytics.summary_by_machine(shift_list=shift_list)
+                      if aggregation == 'detailed'
+                      else analytics.summary_by_machine_period(shift_list=shift_list))
         elif metrics_type == 'downtime':
             result = analytics.downtime_analysis(shift_list=shift_list)
         elif metrics_type == 'operator':
             result = analytics.summary_by_operator(shift_list=shift_list)
             if operators:
+                missing = [o for o in operators if o not in result.index]
+                if missing:
+                    logger.warning(f"Операторы не найдены: {missing}")
                 result = result[result.index.isin(operators)]
         elif metrics_type == 'hourly':
+            if machines:
+                logger.warning("Фильтрация по станкам не поддерживается для hourly — игнорирую")
+                machines = []
             result = analytics.hourly_load(shift_list=shift_list)
             if result is not None:
                 result = result.reset_index()
@@ -143,73 +125,83 @@ def process_query(df, query, model, shift_duration):
             logger.error(f"Неизвестный тип метрики: {metrics_type}")
             return f"Неизвестная метрика: {metrics_type}", None
 
-
-        logger.info(f"Вызов аналитики ({metrics_type}) занял {time.time() - step_start:.2f} сек")
-        
+        logger.info(f"Аналитика ({metrics_type}): {time.time() - step:.2f} сек")
 
         if result is None or result.empty:
             logger.warning("Нет данных по запросу")
             return "Нет данных по запросу.", None
 
-
-
-        step_start = time.time()
-        
-# Принудительная фильтрация по станкам (если указаны)
+        # Фильтрация по станкам
         if machines and isinstance(result, pd.DataFrame) and not result.empty:
-                logger.info(f"Применяем фильтрацию по станкам: {machines}")
-                if aggregation != 'detailed':
-                    if 'Станок' in result.columns:
-                        mask = result['Станок'].str.contains('|'.join(machines), case=False, na=False)
-                        result = result[mask]
-                    else:
-                        try:
-                            result = result[result.index.isin(machines)]
-                        except:
-                            result = result[result.index.str.contains('|'.join(machines), case=False, na=False)]
-                else:
-                    try:
-                        result = result[result.index.get_level_values('Станок').str.contains('|'.join(machines), case=False, na=False)]
-                    except:
-                        pass
-                logger.info(f"После фильтрации осталось {len(result)} строк")
-        
-                if result.empty:
-                    logger.info(f"Станки {machines} не найдены. Доступные станки:")
-                    for m in all_machines:
-                        print(f"  - {m}")
-                    return
-        logger.info(f"Фильтрация по станкам заняла {time.time() - step_start:.2f} сек")
-        # Генерируем ответ
-        step_start = time.time()
-        answer = model.generate_response(query, result, metrics_type)
-        logger.info(f"Генерация ответа заняла {time.time() - step_start:.2f} сек")
+            step = time.time()
+            pattern = "|".join(re.escape(m) for m in machines)
+            if isinstance(result.index, pd.MultiIndex):
+                mask = result.index.get_level_values('Станок').str.contains(
+                    pattern, case=False, na=False)
+                result = result[mask]
+            elif 'Станок' in result.columns:
+                result = result[result['Станок'].str.contains(pattern, case=False, na=False)]
+            else:
+                result = result[result.index.astype(str).str.contains(
+                    pattern, case=False, na=False)]
+
+            logger.info(f"После фильтрации по станкам: {len(result)} строк "
+                        f"({time.time() - step:.2f} сек)")
+            if result.empty:
+                logger.info(f"Станки {machines} не найдены")
+                return (
+                    f"Станки {machines} не найдены в данных. Доступные: "
+                    f"{', '.join(sorted(all_machines)[:15])}",
+                    None,
+                )
+
+        # Генерация ответа
+        step = time.time()
+        answer = model.generate_response(query, result, metrics_type, history=history)
+        logger.info(f"Генерация ответа: {time.time() - step:.2f} сек")
         return answer, result
+
     except Exception as e:
-        logger.error(f"Ошибка обработки запроса: {str(e)}")
-        return f"Ошибка обработки запроса: {str(e)}", None
+        logger.error(f"Ошибка обработки запроса: {e}", exc_info=True)
+        return f"Ошибка обработки запроса: {e}", None
 
 
+# ---------------------------------------------------------------
+# Эндпоинты
 
-    
-# --- Эндпоинт ---
 @app.get("/ping")
 async def ping():
     return {"status": "ok"}
 
-@app.post("/api/analyze2")
 
+@app.post("/api/analyze2")
 async def analyze2(request: QueryRequest):
-    try:
-        start_all = time.time()
-        logger.info(f"Получен POST-запрос: {request.query}")
-        answer = await asyncio.to_thread(process_query, df, request.query, llm, request.shift_duration)
-        logger.info(f"Запрос обработан за {time.time() - start_all:.2f} сек")
-        return {"answer": answer[0]}
-    except Exception as e:
-        logger.error(f"Ошибка: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
-app.mount("/", StaticFiles(directory="site", html=True), name="static")
-# --- Запуск (если файл запускается напрямую) ---
+    if _state["df"].empty:
+        raise HTTPException(503, "Данные не загружены")
+
+    t0 = time.time()
+    logger.info(f"Получен POST-запрос: {request.query}")
+    answer, _ = await asyncio.to_thread(
+        process_query, _state["df"], request.query, llm, request.shift_duration
+    )
+    logger.info(f"Запрос обработан за {time.time() - t0:.2f} сек")
+    return {"answer": answer}
+
+
+@app.post("/api/reload")
+async def reload_data():
+    await asyncio.to_thread(_load_data)
+    if _state["df"].empty:
+        return JSONResponse(status_code=503, content={"status": "failed"})
+    return {"status": "ok", "rows": len(_state["df"])}
+
+
+from chat_api import install_chat_api
+install_chat_api(app, _state, llm, process_query, SHIFT_DURATION)
+
+# Static — в самом конце, чтобы не перекрыть /docs и /api
+app.mount("/", StaticFiles(directory=str(BASE_DIR / "site"), html=True), name="static")
+
+
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

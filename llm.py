@@ -5,6 +5,8 @@ from datetime import datetime
 import pandas as pd
 import requests
 import logging
+from dotenv import load_dotenv
+load_dotenv()
 
 # Логгер для модуля llm
 logger = logging.getLogger(__name__)
@@ -12,127 +14,19 @@ logger = logging.getLogger(__name__)
 
 
 
-class GoRouterAnalyst:
-    """
-    Аналитик на базе GoRouter API (модель gorouter/free).
-    Интерфейс совместим с прежним LocalHFModel:
-      - parse_user_query(query, available_shifts)
-      - generate_response(query, data_result, metrics_type)
-    """
+from ai_provider import AIClient
 
-    API_URL = "https://gorouter.ru/api/v1/chat/completions"
-    # MODEL = "stealth/space-bunny-alpha"
-    # MODEL = "gorouter/free"
-    #MODEL = "inclusionai/ling-3.0-flash-sante:free"
-    """"
-    FALLBACK_MODELS = [
-        "inclusionai/ling-3.0-flash-sante:free",
-        "gorouter/free",
-        "stealth/space-bunny-alpha", 
-        "inclusionai/ling-3.1-flash" 
-        deepseek/deepseek-v4-flash-0731
-    ]
 
-    """
-    FALLBACK_MODELS = [
-        "gorouter/free"
-    ]
+class AIAnalyst:
+    """Provider-independent analytics prompts with a configured AI transport."""
 
-    def __init__(self, api_key=None,model=None):
-        self.api_key = api_key or os.environ.get("GOROUTER_API_KEY")
-        if not self.api_key:
-            raise ValueError(
-                "Не задан GOROUTER_API_KEY. Установите переменную окружения "
-                "или передайте ключ в конструктор."
-            )
-        self.headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
-        # Простая проверка соединения
-        if model:
-            self.FALLBACK_MODELS = [model]
-        logger.info(f"GoRouter готов к работе. Модели: {self.FALLBACK_MODELS}")
-        
+    def __init__(self, api_key=None, model=None):
+        self.client = AIClient(api_key=api_key, model=model)
 
     def _call_llm(self, messages, temperature=0.0, max_tokens=4000):
-        """
-        Универсальный вызов Chat Completions.
-        messages: список dict-ов [{'role': 'system'|'user'|'assistant', 'content': '...'}]
-        Возвращает строку с ответом модели.
-        """
-        last_error=None
-        for model in self.FALLBACK_MODELS:
-            logger.info(f"→ Пробуем модель: {model}")
-            try:
-                payload = {
-                    "model": model,
-                    "messages": messages,
-                    "temperature": temperature,
-                    "max_tokens": max_tokens,
-                }
-                response = requests.post(
-                    self.API_URL,
-                    headers=self.headers,
-                    json=payload,
-                    timeout=120,
-                )
-                response.raise_for_status()
-                data = response.json()
-            # Безопасно достаём сообщение
-                choices = data.get("choices") or []
-                if not choices:
-                    last_error = f"Пустой ответ от {model}"
-                    logger.warning(f"  ✗ {last_error}")
-                    continue
-                message = choices[0].get("message") or {}    
- # Пробуем разные поля, куда модель может положить текст
-                content = message.get("content")
-                if content is None:
-                # Некоторые модели кладут текст в reasoning_content
-                    content = message.get("reasoning_content")
-            # Если content — список (бывает у некоторых API), соберём текст
-                if isinstance(content, list):
-                    parts = []
-                    for item in content:
-                        if isinstance(item, dict) and "text" in item:
-                            parts.append(item["text"])
-                        elif isinstance(item, str):
-                            parts.append(item)
-                    content = " ".join(parts)
+        return self.client.complete(messages, temperature, max_tokens)
 
-             # Если ответ всё ещё пустой — пробуем следующую модель
-                if content is None or not str(content).strip():
-                    last_error = f"Модель {model}: пустой content"
-                    logger.warning(f"  ✗ {last_error}")
-                    continue
-
-                logger.info(f"  ✓ Успешно ответила модель: {model}")
-                return str(content).strip()
-            
-            except requests.exceptions.HTTPError as e:
-                try:
-                    body = e.response.text[:300]
-                except Exception:
-                    body = ""
-                last_error = f"Модель {model}: HTTP {e} | {body}"
-                logger.error(f"  ✗ {last_error}")
-                continue  # ← пробуем следующую модель
-
-            except Exception as e:
-                last_error = f"Модель {model}: {e}"
-                logger.error(f"  ✗ {last_error}")
-                continue  # ← пробуем следующую модель
-            # Если ни одна модель не сработала
-        logger.error(f"  ✗✗ Все модели не сработали. Последняя ошибка: {last_error}")
-        return f"ОШИБКА: все модели недоступны. Последняя ошибка: {last_error}"
-        
-
-
-
-      # ------------------------------------------------------------------
-    # ПАРСИНГ ЗАПРОСА ПОЛЬЗОВАТЕЛЯ
-    def parse_user_query(self, user_query, available_shifts=None):
+    def parse_user_query(self, user_query, available_shifts=None, history=None):
         today = datetime.now().date()
         system_prompt = (
             "Ты — парсер запросов производственного аналитика. "
@@ -141,7 +35,7 @@ class GoRouterAnalyst:
         )
 
         user_prompt = f"""Дата сегодня: {today}.
-Доступные смены (пример): 2025-12-27_День, 2025-12-27_Ночь
+Доступные смены: {', '.join(str(x) for x in (available_shifts or []))}
 
 Поля результирующего JSON:
 - shift_list: список строк формата "ГГГГ-ММ-ДД_День" или "ГГГГ-ММ-ДД_Ночь"
@@ -166,13 +60,13 @@ class GoRouterAnalyst:
 Примеры:
 
 Запрос: "Комов Александр Викторович, Краснов Юрий Андреевич"
-Ответ: {{"metrics_type": "operator", "aggregation": "period", "operators": ["Комов Александр Викторович, Краснов Юрий Андреевич]"}}
+Ответ: {{"metrics_type": "operator", "aggregation": "period", "operators": ["Комов Александр Викторович", "Краснов Юрий Андреевич"]}}
 
 Запрос: "Работа оператора Комов Александр Викторович"
-Ответ: {{"metrics_type": "operator", "aggregation": "period", "operators": ["Комов Александр Викторович]" }}
+Ответ: {{"metrics_type": "operator", "aggregation": "period", "operators": ["Комов Александр Викторович"] }}
 
 Запрос: "В какие смены работал оператор Краснов Юрий Андреевич"
-Ответ: {{"metrics_type": "operator", "aggregation": "period", "operators": ["Краснов Юрий Андреевич]"}}
+Ответ: {{"metrics_type": "operator", "aggregation": "period", "operators": ["Краснов Юрий Андреевич"]}}
 
 Запрос: "КИМ станка 3.6_АРМА-S600 за 27 декабря 2025"
 Ответ: {{"start_date": "2025-12-27", "end_date": "2025-12-27", "machines": ["3.6_АРМА-S600"], "metrics_type": "kim", "aggregation": "period"}}
@@ -195,7 +89,8 @@ class GoRouterAnalyst:
 Ответ:"""
         response_text = self._call_llm(
             messages=[
-                {"role": "system", "content": system_prompt},
+                {"role": "system", "content": system_prompt + " Используй историю для понимания уточнений. Факты бери из предоставленных данных."},
+                *(history or []),
                 {"role": "user", "content": user_prompt},
             ],
             temperature=0.0,
@@ -254,7 +149,7 @@ class GoRouterAnalyst:
         return params
 
   
-    def generate_response(self, user_query, data_result, metrics_type):
+    def generate_response(self, user_query, data_result, metrics_type, history=None):
         # Преобразуем данные в компактный текстовый вид
         if isinstance(data_result, pd.DataFrame):
             if data_result.empty:
@@ -291,7 +186,8 @@ class GoRouterAnalyst:
 Ответ:"""
         answer = self._call_llm(
             messages=[
-                {"role": "system", "content": system_prompt},
+                {"role": "system", "content": system_prompt + " Используй историю для понимания уточнений. Факты бери из предоставленных данных."},
+                *(history or []),
                 {"role": "user", "content": user_prompt},
             ],
             temperature=0.2,
@@ -299,3 +195,6 @@ class GoRouterAnalyst:
         )
         logger.info(f"Ответ аналитика сформирован ({len(answer)} симв.)")
         return answer
+
+# Backwards compatibility for CLI and existing integrations.
+GoRouterAnalyst = AIAnalyst

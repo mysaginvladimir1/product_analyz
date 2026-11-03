@@ -1,0 +1,26 @@
+{
+  "active_provider": "gorouter",
+  "providers": {
+    "gorouter": {
+      "protocol": "openai_chat",
+      "url": "https://gorouter.ru/api/v1/chat/completions",
+      "model": "gorouter/free",
+      "api_key_env": "GOROUTER_API_KEY",
+      "timeout_seconds": 120
+    },
+    "vega": {
+      "protocol": "openai_chat",
+      "url": "https://api.vega.chat/api/v1/chat/completions",
+      "model": "openrouter/free",
+      "api_key_env": "VEGA_API_KEY",
+      "timeout_seconds": 120
+    },
+    "zveno": {
+      "protocol": "openai_chat",
+      "url": "https://api.zveno.ai/v1/chat/completions",
+      "model": "openrouter/free",
+      "api_key_env": "ZVENO_API_KEY",
+      "timeout_seconds": 120
+    }
+  }
+}

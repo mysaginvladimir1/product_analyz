@@ -1,2 +1,52 @@
+# Python environments and bytecode
+.venv/
+venv/
+env/
 __pycache__/
+*.py[cod]
+
+# Local credentials (keep sanitized examples)
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+
+# Logs and test/tool caches
+*.log
+*.log.*
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# Python build output
+build/
+dist/
+*.egg-info/
+
+# Local editor and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Office lock files
+~$*
+
+# Runtime data and generated analytics exports
+/data_test.xlsx
+/data_test_processed.csv
+/query_result_*.xlsx
+/all_metrics_*.xlsx
+
+# Local AI configuration; keep the provider example versioned
+/ai-providers.json
+/ai-providers.local.json
+
+# Existing local-only implementation
 llm_local.py

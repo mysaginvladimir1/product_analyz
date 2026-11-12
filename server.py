@@ -17,14 +17,9 @@ from data_manager import load_excel_data, get_shifts_from_range
 from llm import AIAnalyst
 from ml_core import ProductionAnalytics
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler("analyst.log", encoding='utf-8'),
-        logging.StreamHandler(),
-    ],
-)
+from logging_setup import configure_logging, AccessLogMiddleware
+
+configure_logging()
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Производственный аналитик")
@@ -60,7 +55,7 @@ class QueryRequest(BaseModel):
 
 def process_query(df: pd.DataFrame, query: str, model: AIAnalyst, shift_duration: int, history=None):
     try:
-        logger.info(f"Запрос: {query}")
+        logger.info("Начало обработки запроса")
 
         # Парсинг
         step = time.time()
@@ -69,7 +64,7 @@ def process_query(df: pd.DataFrame, query: str, model: AIAnalyst, shift_duration
         if 'error' in params:
             logger.error(f"Ошибка парсинга: {params['error']}")
             return f"Ошибка: {params['error']}", None
-        logger.info(f"Параметры: {params} | {time.time() - step:.2f} сек")
+        logger.info("Параметры извлечены за %.2f сек", time.time() - step)
 
         metrics_type = params.get('metrics_type', 'kim')
         aggregation = params.get('aggregation', 'period')
@@ -111,7 +106,7 @@ def process_query(df: pd.DataFrame, query: str, model: AIAnalyst, shift_duration
             if operators:
                 missing = [o for o in operators if o not in result.index]
                 if missing:
-                    logger.warning(f"Операторы не найдены: {missing}")
+                    logger.warning("Не найдены операторы: %d", len(missing))
                 result = result[result.index.isin(operators)]
         elif metrics_type == 'hourly':
             if machines:
@@ -180,7 +175,7 @@ async def analyze2(request: QueryRequest):
         raise HTTPException(503, "Данные не загружены")
 
     t0 = time.time()
-    logger.info(f"Получен POST-запрос: {request.query}")
+    logger.info("Получен запрос аналитики")
     answer, _ = await asyncio.to_thread(
         process_query, _state["df"], request.query, llm, request.shift_duration
     )
@@ -201,6 +196,9 @@ install_chat_api(app, _state, llm, process_query, SHIFT_DURATION)
 
 # Static — в самом конце, чтобы не перекрыть /docs и /api
 app.mount("/", StaticFiles(directory=str(BASE_DIR / "site"), html=True), name="static")
+
+
+app = AccessLogMiddleware(app)
 
 
 if __name__ == "__main__":

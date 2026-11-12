@@ -105,7 +105,7 @@ class AIAnalyst:
         # Извлекаем первый сбалансированный JSON-объект
         start = response_text.find("{")
         if start == -1:
-            logger.error(f"JSON не найден в ответе: {response_text[:200]}")
+            logger.error("JSON не найден в ответе AI")
             return {"error": "JSON не найден", "raw_response": response_text[:300]}
 
         brace_count = 0
@@ -119,14 +119,14 @@ class AIAnalyst:
                     end = i + 1
                     break
         if end == -1:
-            logger.error(f"Незакрытый JSON: {response_text[:200]}")
+            logger.error("Незакрытый JSON в ответе AI")
             return {"error": "Незакрытый JSON", "raw_response": response_text[:300]}
 
         json_str = response_text[start:end]
         try:
             params = json.loads(json_str)
         except json.JSONDecodeError as e:
-            logger.error(f"Ошибка разбора JSON: {e} | {json_str}")
+            logger.error("Ошибка разбора JSON: %s", type(e).__name__)
             return {"error": f"Ошибка JSON: {e}", "raw_response": json_str}
 
         # Чистка некорректного shift_list
@@ -145,7 +145,7 @@ class AIAnalyst:
                 except Exception:
                     params.pop(key, None)
 
-        logger.info(f"Распарсенные параметры: {params}")
+        logger.info("Параметры запроса разобраны")
         return params
 
   

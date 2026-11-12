@@ -2239,3 +2239,14 @@ AttributeError: 'str' object has no attribute 'isoformat'. Did you mean '.format
 2026-11-03 08:40:59,990 - INFO - AI provider=gorouter model=gorouter/free protocol=openai_chat
 2026-11-03 08:41:02,858 - INFO - Успешно загружен файл: C:\Users\yanda\Documents\GitHub\product_analyz2\product_analyz\data_test.xlsx (листов: 1 -> ['Лист1'])
 2026-11-03 08:41:02,938 - INFO - Данные загружены за 2.95 сек, строк: 32345
+2026-11-10 08:48:47,487 - INFO - AI provider=vibecode model=bitrix/bitrixgpt-5.6-agent protocol=openai_chat
+2026-11-10 08:48:51,711 - INFO - Успешно загружен файл: C:\Users\yanda\Documents\GitHub\product_analyz2\product_analyz\data_test.xlsx (листов: 1 -> ['Лист1'])
+2026-11-10 08:48:51,798 - INFO - Данные загружены за 4.31 сек, строк: 32345
+2026-11-10 08:49:44,535 - INFO - Запрос: Работа оператора Комов Александр Викторович
+2026-11-10 08:49:46,037 - INFO - Распарсенные параметры: {'metrics_type': 'operator', 'aggregation': 'period', 'operators': ['Комов Александр Викторович']}
+2026-11-10 08:49:46,037 - INFO - Параметры: {'metrics_type': 'operator', 'aggregation': 'period', 'operators': ['Комов Александр Викторович']} | 1.50 сек
+2026-11-10 08:49:46,037 - INFO - Не указаны ни смены, ни даты. Анализируем все смены.
+2026-11-10 08:49:46,037 - INFO - Формирование shift_list: 0.00 сек
+2026-11-10 08:49:46,112 - INFO - Аналитика (operator): 0.07 сек
+2026-11-10 08:49:48,173 - INFO - Ответ аналитика сформирован (225 симв.)
+2026-11-10 08:49:48,174 - INFO - Генерация ответа: 2.06 сек

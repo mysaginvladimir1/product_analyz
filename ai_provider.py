@@ -7,6 +7,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import requests
+from logging_setup import status_description
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +109,8 @@ class AIClient:
         except requests.exceptions.Timeout:
             reason = "таймаут AI-провайдера"
         except requests.exceptions.HTTPError as exc:
-            reason = "HTTP " + str(exc.response.status_code if exc.response is not None else "error")
+            code = exc.response.status_code if exc.response is not None else None
+            reason = f"HTTP {code}: {status_description(code)}"
         except requests.exceptions.RequestException:
             reason = "ошибка подключения к AI-провайдеру"
         except (ValueError, KeyError, IndexError, TypeError, AttributeError):

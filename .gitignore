@@ -43,6 +43,9 @@ Desktop.ini
 /data_test_processed.csv
 /query_result_*.xlsx
 /all_metrics_*.xlsx
+/bitrix_bot.sqlite3
+/bitrix_bot.sqlite3-shm
+/bitrix_bot.sqlite3-wal
 
 # Local AI configuration; keep the provider example versioned
 /ai-providers.json
@@ -50,3 +53,4 @@ Desktop.ini
 
 # Existing local-only implementation
 llm_local.py
+.env.example

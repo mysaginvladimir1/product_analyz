@@ -194,6 +194,9 @@ async def reload_data():
 from chat_api import install_chat_api
 install_chat_api(app, _state, llm, process_query, SHIFT_DURATION)
 
+from bitrix_bot import install_bitrix_bot_api
+install_bitrix_bot_api(app, BASE_DIR)
+
 # Static — в самом конце, чтобы не перекрыть /docs и /api
 app.mount("/", StaticFiles(directory=str(BASE_DIR / "site"), html=True), name="static")
 
@@ -202,4 +205,4 @@ app = AccessLogMiddleware(app)
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="localhost", port=8000)

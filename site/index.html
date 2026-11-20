@@ -15,16 +15,18 @@
 </head>
 <body>
     <h1>Производственный аналитик</h1>
-    <p>Задайте вопрос:</p>
+    <p>Укажите показатель, станок или оператора и период. Данные запрашиваются для вашего вопроса.</p>
     <textarea id="queryInput" placeholder="Например: КИМ станка 3.6_АРМА-S600 за 15 сентября 2026"></textarea>
-    <button onclick="sendQuery()">Отправить</button>
+    <button id="sendButton" onclick="sendQuery()">Отправить</button>
     <div id="response"></div>
     <div class="examples">
         <p>Примеры запросов:</p>
         <ul>
             <li><span class="example" onclick="setExample('КИМ станка 3.6_АРМА-S600 за 15 сентября 2026')">КИМ станка 3.6_АРМА-S600 за 15 сентября 2026</span></li>
-            <li><span class="example" onclick="setExample('Простои в ночную смену 27 декабря')">Простои в ночную смену 27 декабря</span></li>
-            <li><span class="example" onclick="setExample('Работа оператора Комов Александр Викторович')">Работа оператора Комов Александр Викторович</span></li>
+            <li><span class="example" onclick="setExample('Почему станок 3.4 простаивал во вчерашнюю ночную смену?')">Почему станок 3.4 простаивал во вчерашнюю ночную смену?</span></li>
+            <li><span class="example" onclick="setExample('На каких станках работал Комов Александр Викторович за последние 7 дней?')">На каких станках работал оператор за последние 7 дней?</span></li>
+            <li><span class="example" onclick="setExample('В какие дни работал Комов Александр Викторович с 1 по 7 октября 2026?')">В какие дни работал оператор с 1 по 7 октября 2026?</span></li>
+            <li><span class="example" onclick="setExample('Сравни дневные и ночные смены станка 3.4 за октябрь 2026')">Сравни дневные и ночные смены за октябрь 2026</span></li>
         </ul>
     </div>
 
@@ -39,7 +41,9 @@
                 alert('Введите запрос');
                 return;
             }
-            document.getElementById('response').innerHTML = '⏳ Обработка...';
+            const button = document.getElementById('sendButton');
+            button.disabled = true;
+            document.getElementById('response').textContent = '⏳ Обработка...';
             try {
                 const response = await fetch('/api/analyze2', {
                     method: 'POST',
@@ -47,9 +51,11 @@
                     body: JSON.stringify({ query: query })
                 });
                 const data = await response.json();
-                document.getElementById('response').innerHTML = data.answer || 'Ответ не получен';
+                document.getElementById('response').textContent = data.answer || data.detail || 'Ответ не получен';
             } catch (error) {
-                document.getElementById('response').innerHTML = '⚠️ Ошибка: ' + error.message;
+                document.getElementById('response').textContent = '⚠️ Ошибка: ' + error.message;
+            } finally {
+                button.disabled = false;
             }
         }
     </script>

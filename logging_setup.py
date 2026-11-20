@@ -93,7 +93,7 @@ def configure_logging():
     access.propagate = False
     # Our access journal excludes query strings; Uvicorn's default does not.
     logging.getLogger("uvicorn.access").disabled = True
-    for name in ("httpx", "httpcore", "urllib3"):
+    for name in ("httpx", "httpx2", "httpcore", "httpcore2", "urllib3"):
         logging.getLogger(name).setLevel(logging.WARNING)
     return directory
 

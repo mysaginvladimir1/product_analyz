@@ -14,7 +14,10 @@ class ProviderTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.config = Path(self.temp.name) / 'ai.json'
-        self.config.write_text((Path(__file__).parent / 'ai-providers.example.json').read_text(), encoding='utf-8')
+        # Local example configuration may select a different active provider.
+        document = json.loads((Path(__file__).parent / 'ai-providers.example.json').read_text(encoding='utf-8'))
+        document['active_provider'] = 'gorouter'
+        self.config.write_text(json.dumps(document), encoding='utf-8')
         env = patch.dict(os.environ, {'AI_CONFIG': str(self.config), 'GOROUTER_API_KEY': 'g-secret', 'VEGA_API_KEY': 'v-secret', 'ZVENO_API_KEY': 'z-secret'}, clear=True)
         env.start()
         self.addCleanup(env.stop)

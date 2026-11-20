@@ -3,6 +3,7 @@ import pandas as pd
 import inspect
 import sys
 import argparse
+import os
 from pathlib import Path
 from datetime import datetime
 from ml_core import ProductionAnalytics
@@ -267,7 +268,8 @@ if __name__ == "__main__":
     
 
     parser = argparse.ArgumentParser(description='Производственный аналитик')
-    parser.add_argument('file_path', type=str, help='Путь к Excel-файлу')
+    parser.add_argument('file_path', nargs='?', help='Путь к Excel (только --source excel)')
+    parser.add_argument('--source', choices=['winnum', 'excel'], default=os.getenv('DATA_SOURCE', 'winnum'))
     parser.add_argument('--query', type=str, help='Естественно-языковой запрос (включает режим LLM)')
     parser.add_argument('--model', type=str, default='phi-3-mini.gguf', help='Путь к GGUF-файлу модели')
     parser.add_argument('--shift-duration', type=int, default=720, help='Длительность смены в минутах')
@@ -277,6 +279,18 @@ if __name__ == "__main__":
     parser.add_argument('--end-date', type=str, default=None, help='Конечная дата')
 
     args = parser.parse_args()
+
+    if args.source == 'winnum':
+        if args.file_path or args.shifts or args.start_date or args.end_date or args.shift_duration != 720:
+            parser.error('Для Winnum указывайте период и смены в --query; путь к Excel и параметры Excel-режима не используются.')
+        if not args.query:
+            parser.error('Для Winnum укажите --query с вопросом и периодом.')
+        from winnum_service import WinnumService, process_winnum_query
+        answer, _ = process_winnum_query(WinnumService(), args.query, GoRouterAnalyst())
+        print(answer)
+        sys.exit(1 if answer.startswith('ОШИБКА:') else 0)
+    if not args.file_path:
+        parser.error('Для --source excel укажите путь к файлу.')
 
     if args.query:
         # Режим LLM

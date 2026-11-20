@@ -49,7 +49,7 @@ Desktop.ini
 
 # Local AI configuration; keep the provider example versioned
 /ai-providers.json
-/ai-providers.local.json
+/ai-providers.example.json
 
 # Existing local-only implementation
 llm_local.py

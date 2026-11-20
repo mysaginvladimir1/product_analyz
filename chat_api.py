@@ -50,7 +50,7 @@ def install_chat_api(app, state, model, process_query, shift_duration):
             raise HTTPException(422, "Duplicate messageUUID in history")
         if sum(len(item.message) for item in request.messages) > 100000:
             raise HTTPException(413, "History is too large")
-        if state["df"].empty:
+        if state.get('source', 'excel') == 'excel' and state["df"].empty:
             raise HTTPException(503, "Данные не загружены")
         history = [
             {"role": "user" if item.author == "user" else "assistant", "content": item.message}

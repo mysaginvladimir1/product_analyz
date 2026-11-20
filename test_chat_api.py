@@ -63,6 +63,12 @@ class ChatTests(unittest.TestCase):
             model.parse_user_query('А сегодня?', history=history)
             self.assertEqual(call.call_args.kwargs['messages'][1], history[0])
 
+    def test_winnum_chat_does_not_require_excel(self):
+        self.state['source'] = 'winnum'
+        self.state['df'] = pd.DataFrame()
+        self.assertEqual(self.post().status_code, 200)
+        self.assertEqual(len(self.calls), 1)
+
 
 if __name__ == '__main__':
     unittest.main()

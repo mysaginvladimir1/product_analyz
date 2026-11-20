@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from data_manager import load_excel_data, get_shifts_from_range
 from llm import AIAnalyst
 from ml_core import ProductionAnalytics
+from winnum_service import WinnumService, process_winnum_query
 
 from logging_setup import configure_logging, AccessLogMiddleware
 
@@ -28,11 +29,18 @@ BASE_DIR = Path(__file__).resolve().parent
 DATA_PATH = os.environ.get("DATA_PATH", str(BASE_DIR / "data_test.xlsx"))
 SHIFT_DURATION = 720
 
-_state = {"df": pd.DataFrame()}
+DATA_SOURCE = os.environ.get('DATA_SOURCE', 'winnum').lower()
+if DATA_SOURCE not in ('winnum', 'excel'):
+    raise ValueError('DATA_SOURCE must be winnum or excel')
+_state = {"df": pd.DataFrame(), "source": DATA_SOURCE}
+winnum = WinnumService()
 llm = AIAnalyst()
 
 
 def _load_data():
+    if DATA_SOURCE == 'winnum':
+        winnum.clear_cache()
+        return
     t0 = time.time()
     df = load_excel_data(DATA_PATH, save_processed=False)
     if df.empty:
@@ -54,6 +62,8 @@ class QueryRequest(BaseModel):
 # Основная логика запроса
 
 def process_query(df: pd.DataFrame, query: str, model: AIAnalyst, shift_duration: int, history=None):
+    if DATA_SOURCE == 'winnum':
+        return process_winnum_query(winnum, query, model, history)
     try:
         logger.info("Начало обработки запроса")
 
@@ -171,21 +181,27 @@ async def ping():
 
 @app.post("/api/analyze2")
 async def analyze2(request: QueryRequest):
-    if _state["df"].empty:
+    if DATA_SOURCE == 'winnum' and request.shift_duration != 720:
+        raise HTTPException(422, 'Для Winnum используются смены 07:00–19:00 и 19:00–07:00 длительностью 720 минут.')
+    if DATA_SOURCE == 'excel' and _state["df"].empty:
         raise HTTPException(503, "Данные не загружены")
 
     t0 = time.time()
     logger.info("Получен запрос аналитики")
-    answer, _ = await asyncio.to_thread(
+    answer, result = await asyncio.to_thread(
         process_query, _state["df"], request.query, llm, request.shift_duration
     )
     logger.info(f"Запрос обработан за {time.time() - t0:.2f} сек")
-    return {"answer": answer}
+    if answer.startswith('ОШИБКА:'):
+        raise HTTPException(502, answer)
+    return {"answer": answer, "data": result if DATA_SOURCE == 'winnum' else None}
 
 
 @app.post("/api/reload")
 async def reload_data():
     await asyncio.to_thread(_load_data)
+    if DATA_SOURCE == 'winnum':
+        return {"status": "ok", "source": "winnum", "message": "Кэш справочника сброшен. Данные запрашиваются по вопросу."}
     if _state["df"].empty:
         return JSONResponse(status_code=503, content={"status": "failed"})
     return {"status": "ok", "rows": len(_state["df"])}
